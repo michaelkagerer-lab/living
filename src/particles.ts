@@ -1,0 +1,79 @@
+import type { Particle } from './types';
+import {
+  PARTICLE_COUNT,
+  TORUS_R_MAJOR, TORUS_R_MINOR, TORUS_Y_SQUISH,
+  DOT_MIN, DOT_MAX,
+  COLOR_CUMULATIVE,
+  TAU,
+} from './config';
+
+function torusXY(
+  phi: number, theta: number,
+  cx: number, cy: number,
+  minDim: number,
+): [number, number] {
+  const R = TORUS_R_MAJOR * minDim;
+  const r = TORUS_R_MINOR * minDim;
+  const x = (R + r * Math.cos(theta)) * Math.cos(phi);
+  const y = (R + r * Math.cos(theta)) * Math.sin(phi) * TORUS_Y_SQUISH;
+  return [cx + x, cy + y];
+}
+
+function pickColor(rand: number): number {
+  for (let c = 0; c < COLOR_CUMULATIVE.length; c++) {
+    if (rand < COLOR_CUMULATIVE[c]) return c;
+  }
+  return COLOR_CUMULATIVE.length - 1;
+}
+
+export function initParticles(width: number, height: number): Particle[] {
+  const cx = width / 2;
+  const cy = height / 2;
+  const minDim = Math.min(width, height);
+
+  const particles: Particle[] = new Array(PARTICLE_COUNT);
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const phi   = Math.random() * TAU;
+    const theta = Math.random() * TAU;
+    const [hx, hy] = torusXY(phi, theta, cx, cy, minDim);
+
+    // Depth cue: cos(theta) 1 = tube-front (close), -1 = tube-back (far)
+    const depth = (Math.cos(theta) + 1) * 0.5; // 0..1
+    const dotRadius = DOT_MIN + depth * (DOT_MAX - DOT_MIN);
+
+    particles[i] = {
+      id: i,
+      x: hx,
+      y: hy,
+      vx: 0,
+      vy: 0,
+      hx,
+      hy,
+      phi,
+      theta,
+      phase: Math.random() * TAU,
+      dotRadius,
+      colorIndex: pickColor(Math.random()),
+    };
+  }
+
+  return particles;
+}
+
+// Called on canvas resize — recomputes home positions from stored angles
+export function repositionHomes(
+  particles: Particle[],
+  width: number,
+  height: number,
+): void {
+  const cx = width / 2;
+  const cy = height / 2;
+  const minDim = Math.min(width, height);
+
+  for (const p of particles) {
+    const [hx, hy] = torusXY(p.phi, p.theta, cx, cy, minDim);
+    p.hx = hx;
+    p.hy = hy;
+  }
+}
