@@ -38,8 +38,8 @@ function main(): void {
 
   function loop(timestamp: number): void {
     const time       = timestamp - startTime;
-    const breathValue = updateParticles(particles, mouse, cssW / 2, cssH / 2, cssW, cssH, time);
-    render(ctx, particles, cssW, cssH, breathValue);
+    const { breathValue, excitement } = updateParticles(particles, mouse, cssW / 2, cssH / 2, cssW, cssH, time);
+    render(ctx, particles, cssW, cssH, breathValue, excitement);
     requestAnimationFrame(loop);
   }
 

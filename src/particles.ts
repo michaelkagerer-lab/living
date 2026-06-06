@@ -41,6 +41,10 @@ export function initParticles(width: number, height: number): Particle[] {
     const [hx, hy] = torusXY(phi, theta, cx, cy, minDim);
     const depth = (Math.cos(theta) + 1) * 0.5; // 0 = back, 1 = front
 
+    // Bimodal temperament: ~50% shy (0..0.38), ~50% bold (0.62..1.0), few in-between
+    const tr = Math.random();
+    const temperament = tr < 0.5 ? tr * 0.76 : 0.62 + (tr - 0.5) * 0.76;
+
     particles[i] = {
       id: i,
       x: hx, y: hy,
@@ -51,6 +55,7 @@ export function initParticles(width: number, height: number): Particle[] {
       dotRadius: DOT_MIN + depth * (DOT_MAX - DOT_MIN),
       colorIndex: pickColor(Math.random()),
       isNear: Math.cos(theta) > 0,
+      temperament,
       energy: 0,
     };
   }

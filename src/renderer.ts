@@ -4,6 +4,7 @@ import {
   LINE_DIST, MAX_LINES, LINE_ALPHA,
   GLOW_ALPHA, GLOW_RADIUS_FACTOR, ENERGY_GLOW_K,
   SPEED_SIZE_K,
+  STREAK_LEN_K, STREAK_ALPHA,
   TORUS_R_MAJOR,
   TAU,
 } from './config';
@@ -85,12 +86,28 @@ function drawBucket(
   ctx.fill();
 }
 
+// Velocity streak pass — comet tails for energised particles
+function drawStreaks(ctx: CanvasRenderingContext2D, bucket: Particle[]): void {
+  ctx.beginPath();
+  for (let i = 0; i < bucket.length; i++) {
+    const p = bucket[i];
+    if (p.energy < 0.4) continue;
+    const spd = Math.hypot(p.vx, p.vy);
+    if (spd < 0.01) continue;
+    const len = p.dotRadius * p.energy * STREAK_LEN_K;
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x - (p.vx / spd) * len, p.y - (p.vy / spd) * len);
+  }
+  ctx.stroke();
+}
+
 export function render(
   ctx: CanvasRenderingContext2D,
   particles: Particle[],
   width: number,
   height: number,
   breathValue: number,
+  excitement: number,
 ): void {
   if (width !== gridWidth) {
     grid.setDimensions(width);
@@ -100,11 +117,15 @@ export function render(
   // ── 1. Clear ──────────────────────────────────────────────────────────────
   ctx.clearRect(0, 0, width, height);
 
-  // ── 2. Background breathing glow ──────────────────────────────────────────
+  // ── 2. Background breathing glow (excitement-reactive: cool→warm) ─────────
   const minDim = Math.min(width, height);
   const glowR  = minDim * (TORUS_R_MAJOR + breathValue * 0.025);
+  const r = Math.round(180 + excitement * 75);
+  const g = Math.round(190 + excitement * 10);
+  const b = Math.round(255 - excitement * 85);
+  const a = (0.055 + excitement * 0.015).toFixed(3);
   const grad   = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, glowR);
-  grad.addColorStop(0, 'rgba(180,190,255,0.055)');
+  grad.addColorStop(0, `rgba(${r},${g},${b},${a})`);
   grad.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
@@ -168,7 +189,18 @@ export function render(
   }
   ctx.restore();
 
-  // ── 7. Solid particles — far layer (slightly dimmed) then near layer (full) ─
+  // ── 7. Velocity streaks — motion trails for energised particles ──────────────
+  ctx.save();
+  ctx.globalAlpha = STREAK_ALPHA;
+  ctx.lineWidth   = 0.8;
+  for (let c = 0; c < COLORS.length; c++) {
+    ctx.strokeStyle = COLORS[c];
+    drawStreaks(ctx, farBuckets[c]);
+    drawStreaks(ctx, nearBuckets[c]);
+  }
+  ctx.restore();
+
+  // ── 8. Solid particles — far layer (slightly dimmed) then near layer (full) ─
   ctx.save();
   for (let c = 0; c < COLORS.length; c++) {
     if (farBuckets[c].length === 0 && nearBuckets[c].length === 0) continue;
