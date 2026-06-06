@@ -2,7 +2,7 @@ import type { Particle } from './types';
 import {
   COLORS,
   LINE_DIST, MAX_LINES, LINE_ALPHA,
-  GLOW_ALPHA, GLOW_RADIUS_FACTOR, ENERGY_GLOW_K,
+  GLOW_ALPHA, GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, GLOW_ENERGY_THRESHOLD,
   SPEED_SIZE_K,
   STREAK_LEN_K, STREAK_ALPHA,
   TORUS_R_MAJOR,
@@ -75,11 +75,13 @@ function drawBucket(
   bucket: Particle[],
   radiusMult: number,
   energyBoost: number,
+  minEnergy = 0,
 ): void {
   ctx.beginPath();
   for (let i = 0; i < bucket.length; i++) {
-    const p  = bucket[i];
-    const r  = p.dotRadius * radiusMult * (1 + p.energy * energyBoost);
+    const p = bucket[i];
+    if (p.energy < minEnergy) continue;
+    const r = p.dotRadius * radiusMult * (1 + p.energy * energyBoost);
     ctx.moveTo(p.x + r, p.y);
     ctx.arc(p.x, p.y, r, 0, TAU);
   }
@@ -92,7 +94,7 @@ function drawStreaks(ctx: CanvasRenderingContext2D, bucket: Particle[]): void {
   for (let i = 0; i < bucket.length; i++) {
     const p = bucket[i];
     if (p.energy < 0.4) continue;
-    const spd = Math.hypot(p.vx, p.vy);
+    const spd = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
     if (spd < 0.01) continue;
     const len = p.dotRadius * p.energy * STREAK_LEN_K;
     ctx.moveTo(p.x, p.y);
@@ -182,10 +184,10 @@ export function render(
     ctx.fillStyle = COLORS[c];
 
     ctx.globalAlpha = GLOW_ALPHA * 0.75;
-    drawBucket(ctx, farBuckets[c],  GLOW_RADIUS_FACTOR, ENERGY_GLOW_K);
+    drawBucket(ctx, farBuckets[c],  GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, GLOW_ENERGY_THRESHOLD);
 
     ctx.globalAlpha = GLOW_ALPHA;
-    drawBucket(ctx, nearBuckets[c], GLOW_RADIUS_FACTOR, ENERGY_GLOW_K);
+    drawBucket(ctx, nearBuckets[c], GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, GLOW_ENERGY_THRESHOLD);
   }
   ctx.restore();
 

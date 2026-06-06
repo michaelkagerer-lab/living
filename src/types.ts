@@ -19,6 +19,9 @@ export interface Particle {
 export interface MouseState {
   x: number;
   y: number;
-  speed: number;   // EMA-smoothed magnitude (px per ~16 ms frame)
+  speed: number;    // EMA-smoothed magnitude (px per ~16 ms frame)
   active: boolean;
+  lastActiveX: number;  // position when mouse last left the canvas
+  lastActiveY: number;
+  justLeft: boolean;    // consumed by physics to trigger afterglow
 }

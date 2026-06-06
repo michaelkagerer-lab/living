@@ -1,7 +1,8 @@
 import type { MouseState } from './types';
 
 export function createMouseState(): MouseState {
-  return { x: -9999, y: -9999, speed: 0, active: false };
+  return { x: -9999, y: -9999, speed: 0, active: false,
+           lastActiveX: -9999, lastActiveY: -9999, justLeft: false };
 }
 
 export function attachInputListeners(
@@ -29,10 +30,15 @@ export function attachInputListeners(
   }
 
   function handleEnd(): void {
+    if (mouse.active) {
+      mouse.lastActiveX = mouse.x;
+      mouse.lastActiveY = mouse.y;
+      mouse.justLeft    = true;
+    }
     mouse.active = false;
-    mouse.x = -9999;
-    mouse.y = -9999;
-    mouse.speed = 0;
+    mouse.x      = -9999;
+    mouse.y      = -9999;
+    mouse.speed  = 0;
   }
 
   canvas.addEventListener('mousemove', (e: MouseEvent) => {
