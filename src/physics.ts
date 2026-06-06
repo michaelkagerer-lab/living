@@ -1,4 +1,4 @@
-import type { Particle, MouseState } from './types';
+import type { Particle, MouseState, BehaviorState } from './types';
 import { torusXY } from './particles';
 import {
   SPRING_K, DAMPING,
@@ -21,13 +21,23 @@ import {
   TILT_DEVICE_AMP,
   GESTURE_SPIN_FRAMES, GESTURE_SPIN_MULT,
   HOVER_GAZE_SNAP_MS, HOVER_GAZE_HOLD_MS,
+  STATE_MOOD_CURIOUS_THRESHOLD, STATE_MOOD_RESTING_THRESHOLD,
+  STATE_STARTLE_HOLD_MS, STATE_CAUTIOUS_HOLD_MS,
+  STATE_PLAYFUL_TRUST_MIN, STATE_PLAYFUL_MOOD_MIN,
+  STATE_TRANSITION_DAMP,
+  HABITUATION_DECAY_MS, HABITUATION_MAX_COUNT,
+  HABITUATION_MIN_SCALE, SENSITIZATION_WINDOW_MS, SENSITIZATION_BOOST,
+  LEADER_WANDER_MULT, LEADER_SPRING_MULT, LEADER_ALIGN_WEIGHT, LEADER_GAZE_MULT,
+  CIRCADIAN_FREQ, CIRCADIAN_AMP, CIRCADIAN_BIAS, CIRCADIAN_WANDER_K, CIRCADIAN_BREATH_K,
+  PREDICT_LEAD_MS, PREDICT_RADIUS, PREDICT_STRENGTH,
   PARTICLE_COUNT,
   TAU,
 } from './config';
 
-const REPEL_RADIUS_SQ   = REPEL_RADIUS   * REPEL_RADIUS;
-const ATTRACT_RADIUS_SQ = ATTRACT_RADIUS * ATTRACT_RADIUS;
-const GAZE_RADIUS_SQ    = GAZE_RADIUS    * GAZE_RADIUS;
+const REPEL_RADIUS_SQ    = REPEL_RADIUS    * REPEL_RADIUS;
+const ATTRACT_RADIUS_SQ  = ATTRACT_RADIUS  * ATTRACT_RADIUS;
+const GAZE_RADIUS_SQ     = GAZE_RADIUS     * GAZE_RADIUS;
+const PREDICT_RADIUS_SQ  = PREDICT_RADIUS  * PREDICT_RADIUS;
 
 // ── Wander force — dual-octave position-sampled flow field ────────────────────
 function wanderForce(
@@ -54,9 +64,9 @@ function lerpAngle(a: number, b: number, t: number): number {
 // ── Typed-array alignment + boids grid ───────────────────────────────────────
 const alignVx   = new Float32Array(ALIGN_MAX_CELLS);
 const alignVy   = new Float32Array(ALIGN_MAX_CELLS);
-const alignCx   = new Float32Array(ALIGN_MAX_CELLS);  // position sum x
-const alignCy   = new Float32Array(ALIGN_MAX_CELLS);  // position sum y
-const alignN    = new Uint16Array(ALIGN_MAX_CELLS);
+const alignCx   = new Float32Array(ALIGN_MAX_CELLS);
+const alignCy   = new Float32Array(ALIGN_MAX_CELLS);
+const alignN    = new Float32Array(ALIGN_MAX_CELLS);  // float to support leader weighting
 const alignIdx  = new Int32Array(PARTICLE_COUNT);
 const usedCells = new Uint16Array(ALIGN_MAX_CELLS);
 let   usedCount = 0;
@@ -79,11 +89,12 @@ function buildAlignGrid(particles: Particle[], width: number): void {
     const k = ((p.y / ALIGN_CELL) | 0) * alignCols + ((p.x / ALIGN_CELL) | 0);
     if (alignN[k] === 0) usedCells[usedCount++] = k;
     alignIdx[i] = k;
-    alignVx[k] += p.vx;
-    alignVy[k] += p.vy;
-    alignCx[k] += p.x;
-    alignCy[k] += p.y;
-    alignN[k]++;
+    const w = p.isLeader ? LEADER_ALIGN_WEIGHT : 1;
+    alignVx[k] += p.vx * w;
+    alignVy[k] += p.vy * w;
+    alignCx[k] += p.x * w;
+    alignCy[k] += p.y * w;
+    alignN[k]  += w;
   }
 }
 
@@ -113,6 +124,25 @@ let hoverDeepMs          = 0;
 // ── Startle leading-edge detection ────────────────────────────────────────────
 let prevAggression = 0;
 
+// ── Behavioral state machine ──────────────────────────────────────────────────
+let behaviorState: BehaviorState = 'RESTING';
+let stateEnteredAt = 0;
+let stateBlend     = 0;
+
+// Per-state physics multipliers [wanderScale, springK, attractStrength, alignK]
+const STATE_MULTS: Record<BehaviorState, [number, number, number, number]> = {
+  RESTING:  [0.5, 1.2, 0.6, 0.8],
+  CURIOUS:  [1.0, 1.0, 1.0, 1.0],
+  PLAYFUL:  [1.4, 0.7, 1.3, 1.2],
+  CAUTIOUS: [0.7, 1.4, 0.5, 1.3],
+  STARTLED: [0.3, 1.6, 0.2, 0.6],
+};
+
+// ── Startle habituation / sensitization ──────────────────────────────────────
+let startleCount         = 0;
+let lastStartleTime      = -99999;
+let startleResponseScale = 1.0;
+
 export function updateParticles(
   particles: Particle[],
   mouse: MouseState,
@@ -122,7 +152,16 @@ export function updateParticles(
   height: number,
   time: number,
   tilt: { x: number; y: number } = { x: 0, y: 0 },
-): { breathValue: number; excitement: number; mood: number; twitchFired: boolean; startleFired: boolean } {
+): {
+  breathValue: number;
+  excitement: number;
+  mood: number;
+  twitchFired: boolean;
+  startleFired: boolean;
+  behaviorState: BehaviorState;
+  circadian: number;
+  startleResponseScale: number;
+} {
   const minDim      = Math.min(width, height);
   const ySquish     = TORUS_Y_SQUISH * (1 + Math.sin(time * TILT_SPEED) * TILT_AMP)
                     + tilt.y * TILT_DEVICE_AMP;
@@ -131,6 +170,9 @@ export function updateParticles(
   const mouseX      = mouse.x;
   const mouseY      = mouse.y;
   const speedBoost  = Math.min(1 + mouse.speed * REPEL_SPEED_K, SPEED_BOOST_CAP);
+
+  // ── Circadian envelope (~3.5 min period) ─────────────────────────────────
+  const circadian = Math.sin(time * CIRCADIAN_FREQ * TAU) * CIRCADIAN_AMP + CIRCADIAN_BIAS;
 
   // ── Autonomous mood oscillator ────────────────────────────────────────────
   const moodBase = Math.sin(time * MOOD_FREQ * TAU);
@@ -151,9 +193,85 @@ export function updateParticles(
   const startleFired = aggression > STARTLE_TRIGGER_THRESHOLD && prevAggression <= STARTLE_TRIGGER_THRESHOLD;
   prevAggression     = aggression;
 
+  // ── Startle habituation / sensitization ──────────────────────────────────
+  if (startleFired) {
+    const timeSinceLast = time - lastStartleTime;
+    if (timeSinceLast < SENSITIZATION_WINDOW_MS) {
+      startleResponseScale = Math.min(startleResponseScale * SENSITIZATION_BOOST, 2.5);
+    } else {
+      startleCount = Math.min(startleCount + 1, HABITUATION_MAX_COUNT);
+    }
+    lastStartleTime = time;
+  }
+  startleCount = Math.max(0, startleCount - 16 / HABITUATION_DECAY_MS);
+  const habFraction  = startleCount / HABITUATION_MAX_COUNT;
+  const targetScale  = HABITUATION_MIN_SCALE + (1 - habFraction) * (1 - HABITUATION_MIN_SCALE);
+  startleResponseScale += (targetScale - startleResponseScale) * 0.02;
+
+  // ── Behavioral state machine ──────────────────────────────────────────────
+  const elapsed = time - stateEnteredAt;
+  const prevState = behaviorState;
+
+  const circadianRestBias = circadian < -0.20;
+  const circadianActiveBias = circadian > 0.30;
+
+  switch (behaviorState) {
+    case 'RESTING':
+      if (!circadianRestBias && mood > STATE_MOOD_CURIOUS_THRESHOLD && elapsed > 2000)
+        behaviorState = 'CURIOUS';
+      break;
+    case 'CURIOUS':
+      if (startleFired)
+        behaviorState = 'CAUTIOUS';
+      else if (trustLevel > STATE_PLAYFUL_TRUST_MIN && mood > STATE_PLAYFUL_MOOD_MIN && !circadianRestBias)
+        behaviorState = 'PLAYFUL';
+      else if (mood < STATE_MOOD_RESTING_THRESHOLD && !circadianActiveBias)
+        behaviorState = 'RESTING';
+      break;
+    case 'PLAYFUL':
+      if (aggression > STARTLE_TRIGGER_THRESHOLD)
+        behaviorState = 'STARTLED';
+      else if (trustLevel < STATE_PLAYFUL_TRUST_MIN * 0.5 || circadianRestBias)
+        behaviorState = 'CURIOUS';
+      break;
+    case 'STARTLED':
+      if (elapsed > STATE_STARTLE_HOLD_MS)
+        behaviorState = 'CAUTIOUS';
+      break;
+    case 'CAUTIOUS':
+      if (startleFired) {
+        stateEnteredAt = time; // reset hold timer — re-startled in caution
+      } else if (elapsed > STATE_CAUTIOUS_HOLD_MS) {
+        behaviorState = (trustLevel > 0.3 && mood > 0) ? 'CURIOUS' : 'RESTING';
+      }
+      break;
+  }
+
+  if (behaviorState !== prevState) {
+    stateBlend     = 0;
+    stateEnteredAt = time;
+  }
+  stateBlend = Math.min(1, stateBlend + STATE_TRANSITION_DAMP);
+
+  // Blend current state multipliers
+  const [smWander, smSpring, smAttract, smAlign] = STATE_MULTS[behaviorState];
+  const [pmWander, pmSpring, pmAttract, pmAlign] = STATE_MULTS[prevState];
+  const stateMixWander  = pmWander  + (smWander  - pmWander)  * stateBlend;
+  const stateMixSpring  = pmSpring  + (smSpring  - pmSpring)  * stateBlend;
+  const stateMixAttract = pmAttract + (smAttract - pmAttract) * stateBlend;
+  const stateMixAlign   = pmAlign   + (smAlign   - pmAlign)   * stateBlend;
+
   // ── Effective breath amplitude ────────────────────────────────────────────
   const moodBreathBoost    = mood > 0 ? mood * 0.20 : mood * 0.12;
-  const effectiveBreathAmp = BREATH_AMP * (1 + moodBreathBoost + gentleness * 0.25);
+  const effectiveBreathAmp = BREATH_AMP
+    * (1 + moodBreathBoost + gentleness * 0.25)
+    * (1 + circadian * CIRCADIAN_BREATH_K);
+
+  // ── Effective attraction (mood + trust + state modulated) ────────────────
+  const effectiveAttract = ATTRACT_STRENGTH
+    * (1 + (mood > 0 ? mood * MOOD_AMP : 0))
+    * (1 + trustLevel * TRUST_ATTRACT_SCALE)
+    * stateMixAttract;
 
   // ── Quirk twitches ────────────────────────────────────────────────────────
   const twitchSlot   = Math.floor(time / TWITCH_INTERVAL);
@@ -167,11 +285,6 @@ export function updateParticles(
     twitchAx = Math.cos(twitchAng) * TWITCH_STRENGTH;
     twitchAy = Math.sin(twitchAng) * TWITCH_STRENGTH;
   }
-
-  // ── Effective attraction (mood + trust modulated) ─────────────────────────
-  const effectiveAttract = ATTRACT_STRENGTH
-    * (1 + (mood > 0 ? mood * MOOD_AMP : 0))
-    * (1 + trustLevel * TRUST_ATTRACT_SCALE);
 
   // ── Afterglow — trigger on mouse leave, then decay ───────────────────────
   if (mouse.justLeft) {
@@ -238,6 +351,10 @@ export function updateParticles(
     gazePhi + effectiveRotation * time, gazeTheta, cx, cy, minDim, ySquish, xShear,
   );
 
+  // ── Mouse trajectory prediction ───────────────────────────────────────────
+  const predictX = mouseActive ? mouseX + mouse.vx * (PREDICT_LEAD_MS / 16) : -9999;
+  const predictY = mouseActive ? mouseY + mouse.vy * (PREDICT_LEAD_MS / 16) : -9999;
+
   buildAlignGrid(particles, width);
 
   // Hoisted loop-invariant breath time
@@ -264,24 +381,32 @@ export function updateParticles(
     const hxEff = cx + (p.hx - cx) * breathScale;
     const hyEff = cy + (p.hy - cy) * breathScale;
 
-    // ── Spring toward home ────────────────────────────────────────────────
+    // ── Spring toward home (state + leader modulated) ─────────────────────
     const anxietySpringBoost = mood < 0 ? (1 + Math.abs(mood) * 0.3) : 1;
-    const effectiveK = SPRING_K * (0.65 + p.temperament * 0.70) * anxietySpringBoost;
+    const leaderSpringMult   = p.isLeader ? LEADER_SPRING_MULT : 1.0;
+    const effectiveK = SPRING_K * (0.65 + p.temperament * 0.70) * anxietySpringBoost
+                     * stateMixSpring * leaderSpringMult;
     ax += (hxEff - p.x) * effectiveK;
     ay += (hyEff - p.y) * effectiveK;
 
-    // ── Wander (dampened during startle recovery) ─────────────────────────
+    // ── Wander (state + circadian + leader modulated) ─────────────────────
     const [wx, wy]    = wanderForce(p.x, p.y, time, p.phase);
-    const wanderScale = (0.45 + p.temperament * 1.10) * (1 - recoveryStrength * 0.40);
+    const leaderWanderMult = p.isLeader ? LEADER_WANDER_MULT : 1.0;
+    const wanderScale = (0.45 + p.temperament * 1.10)
+                      * (1 - recoveryStrength * 0.40)
+                      * stateMixWander
+                      * (1 + circadian * CIRCADIAN_WANDER_K)
+                      * leaderWanderMult;
     ax += wx * wanderScale;
     ay += wy * wanderScale;
 
-    // ── Gaze pull ─────────────────────────────────────────────────────────
+    // ── Gaze pull (leader modulated) ──────────────────────────────────────
     const gdx     = gazeWx - p.x;
     const gdy     = gazeWy - p.y;
     const gDistSq = gdx * gdx + gdy * gdy;
     if (gDistSq > 0.01 && gDistSq < GAZE_RADIUS_SQ) {
-      const inv = GAZE_STRENGTH / Math.sqrt(gDistSq);
+      const leaderGazeMult = p.isLeader ? LEADER_GAZE_MULT : 1.0;
+      const inv = GAZE_STRENGTH * leaderGazeMult / Math.sqrt(gDistSq);
       ax += gdx * inv;
       ay += gdy * inv;
     }
@@ -296,7 +421,7 @@ export function updateParticles(
         if (distSq < REPEL_RADIUS_SQ) {
           const dist    = Math.sqrt(distSq);
           const t       = 1 - dist / REPEL_RADIUS;
-          const force   = REPEL_STRENGTH * t * t * speedBoost;
+          const force   = REPEL_STRENGTH * t * t * speedBoost * startleResponseScale;
           const invDist = 1 / dist;
           ax += dx * invDist * force;
           ay += dy * invDist * force;
@@ -312,8 +437,8 @@ export function updateParticles(
       }
 
       if (aggression > 0 && !gestureScatter) {
-        ax -= (p.x - cx) * STARTLE_K * aggression * speedBoost;
-        ay -= (p.y - cy) * STARTLE_K * aggression * speedBoost;
+        ax -= (p.x - cx) * STARTLE_K * aggression * speedBoost * startleResponseScale;
+        ay -= (p.y - cy) * STARTLE_K * aggression * speedBoost * startleResponseScale;
       }
     }
 
@@ -321,6 +446,22 @@ export function updateParticles(
     if (gestureScatter) {
       ax += (p.x - cx) * STARTLE_K * 1.5;
       ay += (p.y - cy) * STARTLE_K * 1.5;
+    }
+
+    // ── Mouse trajectory prediction ───────────────────────────────────────
+    if (mouseActive && mouse.speed > 0.5) {
+      const pdx = predictX - p.x;
+      const pdy = predictY - p.y;
+      const pdSq = pdx * pdx + pdy * pdy;
+      if (pdSq > 0.01 && pdSq < PREDICT_RADIUS_SQ) {
+        const pdist = Math.sqrt(pdSq);
+        const t = pdist / PREDICT_RADIUS;
+        const bell = 4 * t * (1 - t);
+        const inPath = (pdx * mouse.vx + pdy * mouse.vy) > 0;
+        const f = PREDICT_STRENGTH * bell / pdist;
+        ax += inPath ? pdx * f : -pdx * f * 0.3;
+        ay += inPath ? pdy * f : -pdy * f * 0.3;
+      }
     }
 
     // ── Afterglow attraction ──────────────────────────────────────────────
@@ -338,13 +479,13 @@ export function updateParticles(
       }
     }
 
-    // ── Velocity alignment (typed-array flocking) ─────────────────────────
+    // ── Velocity alignment (state modulated) ──────────────────────────────
     const k     = alignIdx[i];
     const n     = alignN[k] || 1;
     const avgVx = alignVx[k] / n;
     const avgVy = alignVy[k] / n;
-    ax += (avgVx - p.vx) * ALIGN_K;
-    ay += (avgVy - p.vy) * ALIGN_K;
+    ax += (avgVx - p.vx) * ALIGN_K * stateMixAlign;
+    ay += (avgVy - p.vy) * ALIGN_K * stateMixAlign;
 
     // ── Boids: cohesion + separation ──────────────────────────────────────
     const localCx   = alignCx[k] / n;
@@ -399,5 +540,12 @@ export function updateParticles(
   const breathValue = Math.sin(bt);
   const excitement  = totalEnergy / particles.length / ENERGY_MAX;
 
-  return { breathValue, excitement, mood, twitchFired: twitchActive, startleFired };
+  return {
+    breathValue, excitement, mood,
+    twitchFired: twitchActive,
+    startleFired,
+    behaviorState,
+    circadian,
+    startleResponseScale,
+  };
 }

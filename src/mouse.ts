@@ -49,7 +49,7 @@ function detectGesture(cx: number, cy: number): MouseState['gesture'] {
 
 export function createMouseState(): MouseState {
   return {
-    x: -9999, y: -9999, speed: 0, active: false,
+    x: -9999, y: -9999, speed: 0, vx: 0, vy: 0, active: false,
     lastActiveX: -9999, lastActiveY: -9999, justLeft: false,
     gesture: 'none',
   };
@@ -70,6 +70,8 @@ export function attachInputListeners(
     const dy  = clientY - prevY;
     const rawSpeed = Math.sqrt(dx * dx + dy * dy) / dt * 16;
     mouse.speed  = mouse.speed * 0.78 + rawSpeed * 0.22;
+    mouse.vx     = mouse.vx * 0.78 + (dx / dt * 16) * 0.22;
+    mouse.vy     = mouse.vy * 0.78 + (dy / dt * 16) * 0.22;
     mouse.x      = clientX;
     mouse.y      = clientY;
     mouse.active = true;
@@ -97,6 +99,8 @@ export function attachInputListeners(
     mouse.x       = -9999;
     mouse.y       = -9999;
     mouse.speed   = 0;
+    mouse.vx      = 0;
+    mouse.vy      = 0;
     mouse.gesture = 'none';
     pathHead = 0;
     pathFull = false;

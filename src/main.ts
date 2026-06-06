@@ -50,7 +50,7 @@ function main(): void {
   const muteBtn = document.getElementById('mute') as HTMLButtonElement | null;
   if (muteBtn) {
     muteBtn.addEventListener('click', () => {
-      audio.init();  // init on click too, in case first interaction was tap
+      audio.init();
       audio.toggle();
       muteBtn.textContent = audio.muted ? '🔇' : '🔊';
     });
@@ -71,18 +71,25 @@ function main(): void {
       tilt.x += ((mouse.x - cssW / 2) / cssW * 0.6 - tilt.x) * 0.04;
       tilt.y += ((mouse.y - cssH / 2) / cssH * 0.4 - tilt.y) * 0.04;
     } else if (!hasDeviceOrientation) {
-      // Drift back to neutral when mouse is absent
       tilt.x *= 0.98;
       tilt.y *= 0.98;
     }
 
-    const { breathValue, excitement, mood, twitchFired, startleFired } =
-      updateParticles(particles, mouse, cssW / 2, cssH / 2, cssW, cssH, time, tilt);
+    const {
+      breathValue, excitement, mood,
+      twitchFired, startleFired,
+      behaviorState, startleResponseScale,
+    } = updateParticles(particles, mouse, cssW / 2, cssH / 2, cssW, cssH, time, tilt);
 
-    audio.update(breathValue, excitement, mood, twitchFired, startleFired, prevBreathValue);
+    audio.update(
+      breathValue, excitement, mood,
+      twitchFired, startleFired,
+      prevBreathValue,
+      behaviorState, startleResponseScale,
+    );
     prevBreathValue = breathValue;
 
-    render(ctx, particles, cssW, cssH, breathValue, excitement);
+    render(ctx, particles, cssW, cssH, breathValue, excitement, mood, behaviorState);
     requestAnimationFrame(loop);
   }
 

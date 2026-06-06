@@ -4,6 +4,7 @@ import {
   TORUS_R_MAJOR, TORUS_R_MINOR, TORUS_Y_SQUISH,
   DOT_MIN, DOT_MAX,
   COLOR_CUMULATIVE,
+  LEADER_FRACTION,
   TAU,
 } from './config';
 
@@ -57,6 +58,7 @@ export function initParticles(width: number, height: number): Particle[] {
       colorIndex: pickColor(Math.random()),
       isNear: Math.cos(theta) > 0,
       temperament,
+      isLeader: Math.random() < LEADER_FRACTION,
       energy: 0,
     };
   }

@@ -1,3 +1,5 @@
+export type BehaviorState = 'RESTING' | 'CURIOUS' | 'PLAYFUL' | 'CAUTIOUS' | 'STARTLED';
+
 export interface Particle {
   readonly id: number;
   x: number;
@@ -13,6 +15,7 @@ export interface Particle {
   readonly colorIndex: number;  // 0–3 → COLORS
   readonly isNear: boolean;     // cos(theta) > 0 — front depth layer
   readonly temperament: number; // 0=shy/timid, 1=bold/wandering — bimodal distribution
+  readonly isLeader: boolean;   // ~1% of particles, amplified wander + cascade initiators
   energy: number;               // EMA of speed, drives glow intensity
 }
 
@@ -20,6 +23,8 @@ export interface MouseState {
   x: number;
   y: number;
   speed: number;    // EMA-smoothed magnitude (px per ~16 ms frame)
+  vx: number;       // EMA-smoothed x velocity
+  vy: number;       // EMA-smoothed y velocity
   active: boolean;
   lastActiveX: number;  // position when mouse last left the canvas
   lastActiveY: number;

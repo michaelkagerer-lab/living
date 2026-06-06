@@ -123,5 +123,53 @@ export const LINE_DIST  = 24;
 export const LINE_ALPHA = 0.07;
 export const MAX_LINES  = 3;
 
+// ---------- behavioral state machine ----------
+export const STATE_MOOD_CURIOUS_THRESHOLD = 0.30;
+export const STATE_MOOD_RESTING_THRESHOLD = -0.10;
+export const STATE_STARTLE_HOLD_MS        = 3_500;
+export const STATE_CAUTIOUS_HOLD_MS       = 6_000;
+export const STATE_PLAYFUL_TRUST_MIN      = 0.70;
+export const STATE_PLAYFUL_MOOD_MIN       = 0.50;
+export const STATE_TRANSITION_DAMP        = 0.04;
+
+// ---------- startle habituation / sensitization ----------
+export const HABITUATION_DECAY_MS    = 45_000;
+export const HABITUATION_MAX_COUNT   = 6;
+export const HABITUATION_MIN_SCALE   = 0.25;
+export const SENSITIZATION_WINDOW_MS = 2_000;
+export const SENSITIZATION_BOOST     = 1.8;
+
+// ---------- leader / follower social structure ----------
+export const LEADER_FRACTION     = 0.01;
+export const LEADER_WANDER_MULT  = 2.2;
+export const LEADER_SPRING_MULT  = 0.55;
+export const LEADER_ALIGN_WEIGHT = 4.0;
+export const LEADER_GAZE_MULT    = 2.5;
+
+// ---------- circadian rest/activity cycle (~3.5 min period) ----------
+export const CIRCADIAN_FREQ     = 1 / 210_000;
+export const CIRCADIAN_AMP      = 0.40;
+export const CIRCADIAN_BIAS     = 0.10;
+export const CIRCADIAN_WANDER_K = 1.0;
+export const CIRCADIAN_BREATH_K = 0.30;
+
+// ---------- mouse trajectory prediction ----------
+export const PREDICT_LEAD_MS   = 380;
+export const PREDICT_RADIUS    = 220;
+export const PREDICT_STRENGTH  = 0.18;
+
+// ---------- mood color expression ----------
+export const MOOD_TINT_STRENGTH  = 0.28;
+export const MOOD_TINT_LERP_RATE = 0.015;
+
+// ---------- audio harmonic structure ----------
+export const DRONE_BASE_FREQ      = 110;
+export const DRONE_INTERVAL_CALM  = 1.4983;
+export const DRONE_INTERVAL_TENSE = 1.1892;
+export const DRONE_INTERVAL_DRIFT = 0.0060;
+export const DRONE_LFO_FREQ       = 0.07;
+export const DRONE_LFO_AMP        = 0.40;
+export const DRONE_VOICE2_GAIN    = 0.012;
+
 // ---------- math ----------
 export const TAU = Math.PI * 2;

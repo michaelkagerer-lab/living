@@ -1,4 +1,4 @@
-import type { Particle } from './types';
+import type { Particle, BehaviorState } from './types';
 import {
   COLORS,
   LINE_DIST, MAX_LINES, LINE_ALPHA,
@@ -6,6 +6,7 @@ import {
   SPEED_SIZE_K,
   STREAK_LEN_K, STREAK_ALPHA,
   TORUS_R_MAJOR,
+  MOOD_TINT_STRENGTH, MOOD_TINT_LERP_RATE,
   TAU,
 } from './config';
 
@@ -70,6 +71,9 @@ let gridWidth = 0;
 const farBuckets:  Particle[][] = COLORS.map(() => []);
 const nearBuckets: Particle[][] = COLORS.map(() => []);
 
+// ── Mood tint state (lerped each frame) ───────────────────────────────────────
+let tintR = 0, tintG = 0, tintB = 0, tintA = 0;
+
 function drawBucket(
   ctx: CanvasRenderingContext2D,
   bucket: Particle[],
@@ -85,6 +89,26 @@ function drawBucket(
     ctx.moveTo(p.x + r, p.y);
     ctx.arc(p.x, p.y, r, 0, TAU);
   }
+  ctx.fill();
+}
+
+// Tinted version of drawBucket — second pass for mood expression
+function drawBucketTinted(
+  ctx: CanvasRenderingContext2D,
+  bucket: Particle[],
+  radiusMult: number,
+  energyBoost: number,
+  tA: number,
+): void {
+  ctx.beginPath();
+  for (let i = 0; i < bucket.length; i++) {
+    const p = bucket[i];
+    if (p.energy < GLOW_ENERGY_THRESHOLD) continue;
+    const r = p.dotRadius * radiusMult * (1 + p.energy * energyBoost);
+    ctx.moveTo(p.x + r, p.y);
+    ctx.arc(p.x, p.y, r, 0, TAU);
+  }
+  ctx.globalAlpha = tA * 0.75;
   ctx.fill();
 }
 
@@ -110,6 +134,8 @@ export function render(
   height: number,
   breathValue: number,
   excitement: number,
+  mood: number,
+  behaviorState: BehaviorState,
 ): void {
   if (width !== gridWidth) {
     grid.setDimensions(width);
@@ -131,6 +157,20 @@ export function render(
   grad.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
+
+  // ── Mood tint: compute target and lerp ────────────────────────────────────
+  let targetR = 0, targetG = 0, targetB = 0, targetA = 0;
+  switch (behaviorState) {
+    case 'STARTLED': targetR = 255; targetG =  60; targetB =  60; targetA = MOOD_TINT_STRENGTH; break;
+    case 'CAUTIOUS': targetR = 255; targetG = 120; targetB =  60; targetA = MOOD_TINT_STRENGTH * 0.5; break;
+    case 'RESTING':  targetR =  80; targetG = 140; targetB = 255; targetA = MOOD_TINT_STRENGTH * 0.5; break;
+    case 'PLAYFUL':  targetR = 255; targetG = 220; targetB =  80; targetA = MOOD_TINT_STRENGTH * 0.6; break;
+    case 'CURIOUS':  targetA = 0; break;
+  }
+  tintR += (targetR - tintR) * MOOD_TINT_LERP_RATE;
+  tintG += (targetG - tintG) * MOOD_TINT_LERP_RATE;
+  tintB += (targetB - tintB) * MOOD_TINT_LERP_RATE;
+  tintA += (targetA - tintA) * MOOD_TINT_LERP_RATE;
 
   // ── 3. Build spatial grid ─────────────────────────────────────────────────
   grid.clear();
@@ -177,17 +217,24 @@ export function render(
     (p.isNear ? nearBuckets : farBuckets)[p.colorIndex].push(p);
   }
 
-  // ── 6. Glow pre-pass (soft aura, energy-reactive) ─────────────────────────
+  // ── 6. Glow pre-pass (soft aura, energy-reactive + mood tint) ────────────
   ctx.save();
   for (let c = 0; c < COLORS.length; c++) {
     if (farBuckets[c].length === 0 && nearBuckets[c].length === 0) continue;
-    ctx.fillStyle = COLORS[c];
 
+    ctx.fillStyle  = COLORS[c];
     ctx.globalAlpha = GLOW_ALPHA * 0.75;
     drawBucket(ctx, farBuckets[c],  GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, GLOW_ENERGY_THRESHOLD);
 
     ctx.globalAlpha = GLOW_ALPHA;
     drawBucket(ctx, nearBuckets[c], GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, GLOW_ENERGY_THRESHOLD);
+
+    // Mood tint overlay on glow pass only
+    if (tintA > 0.005) {
+      ctx.fillStyle = `rgb(${Math.round(tintR)},${Math.round(tintG)},${Math.round(tintB)})`;
+      drawBucketTinted(ctx, farBuckets[c],  GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, tintA * 0.75);
+      drawBucketTinted(ctx, nearBuckets[c], GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, tintA);
+    }
   }
   ctx.restore();
 
@@ -215,4 +262,7 @@ export function render(
     drawBucket(ctx, nearBuckets[c], 1, SPEED_SIZE_K);
   }
   ctx.restore();
+
+  // Suppress unused variable warning for mood (used indirectly via behaviorState)
+  void mood;
 }
