@@ -37,9 +37,9 @@ function main(): void {
   const startTime = performance.now();
 
   function loop(timestamp: number): void {
-    const time = timestamp - startTime;
-    updateParticles(particles, mouse, cssW / 2, cssH / 2, time);
-    render(ctx, particles, cssW, cssH);
+    const time       = timestamp - startTime;
+    const breathValue = updateParticles(particles, mouse, cssW / 2, cssH / 2, cssW, cssH, time);
+    render(ctx, particles, cssW, cssH, breathValue);
     requestAnimationFrame(loop);
   }
 

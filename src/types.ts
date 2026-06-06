@@ -4,18 +4,20 @@ export interface Particle {
   y: number;
   vx: number;
   vy: number;
-  hx: number;             // home position x — recomputed on resize
-  hy: number;             // home position y — recomputed on resize
-  readonly phi: number;   // azimuthal angle in torus (stored for resize)
-  readonly theta: number; // tube angle in torus   (stored for resize)
-  readonly phase: number; // per-particle phase — breathing + wander offset
-  readonly dotRadius: number;  // display radius in CSS px (depth-cued at init)
-  readonly colorIndex: number; // 0–3, indexes into COLORS
+  hx: number;              // home position x — updated by physics each frame
+  hy: number;              // home position y — updated by physics each frame
+  phi: number;             // azimuthal angle — mutable, incremented for rotation
+  readonly theta: number;  // tube angle — fixed at init
+  readonly phase: number;  // per-particle phase for breathing + wander
+  readonly dotRadius: number;  // base display radius (depth-cued at init)
+  readonly colorIndex: number; // 0–3 → COLORS
+  readonly isNear: boolean;    // cos(theta) > 0 — front depth layer
+  energy: number;              // EMA of speed, drives glow intensity
 }
 
 export interface MouseState {
   x: number;
   y: number;
   speed: number;   // EMA-smoothed magnitude (px per ~16 ms frame)
-  active: boolean; // false when cursor is outside canvas
+  active: boolean;
 }
