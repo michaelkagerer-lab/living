@@ -2,15 +2,13 @@ import type { Particle } from './types';
 import {
   COLORS,
   LINE_DIST, MAX_LINES, LINE_ALPHA,
-  CLOSE_LINE_DIST, CLOSE_LINE_ALPHA,
   GLOW_ALPHA, GLOW_RADIUS_FACTOR, ENERGY_GLOW_K,
   SPEED_SIZE_K,
   TORUS_R_MAJOR,
   TAU,
 } from './config';
 
-const LINE_DIST_SQ       = LINE_DIST       * LINE_DIST;
-const CLOSE_LINE_DIST_SQ = CLOSE_LINE_DIST * CLOSE_LINE_DIST;
+const LINE_DIST_SQ = LINE_DIST * LINE_DIST;
 
 // ── Spatial hash grid ─────────────────────────────────────────────────────────
 class SpatialGrid {
@@ -117,14 +115,13 @@ export function render(
     grid.insert(i, particles[i].x, particles[i].y);
   }
 
-  // ── 4. Two-tier constellation lines ───────────────────────────────────────
+  // ── 4. Constellation lines ────────────────────────────────────────────────
   ctx.save();
+  ctx.globalAlpha = LINE_ALPHA;
   ctx.strokeStyle = '#9aa0a6';
   ctx.lineWidth   = 0.6;
-
-  // Close bonds — bright tissue
-  ctx.globalAlpha = CLOSE_LINE_ALPHA;
   ctx.beginPath();
+
   for (let i = 0; i < particles.length; i++) {
     const p         = particles[i];
     const neighbors = grid.getNeighbors(p.x, p.y);
@@ -136,37 +133,14 @@ export function render(
       if (!n) continue;
       const dx = n.x - p.x;
       const dy = n.y - p.y;
-      if (dx * dx + dy * dy < CLOSE_LINE_DIST_SQ) {
+      if (dx * dx + dy * dy < LINE_DIST_SQ) {
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(n.x, n.y);
         drawn++;
       }
     }
   }
-  ctx.stroke();
 
-  // Loose web — faint long-range bonds
-  ctx.globalAlpha = LINE_ALPHA;
-  ctx.beginPath();
-  for (let i = 0; i < particles.length; i++) {
-    const p         = particles[i];
-    const neighbors = grid.getNeighbors(p.x, p.y);
-    let drawn = 0;
-    for (let j = 0; j < neighbors.length && drawn < MAX_LINES; j++) {
-      const nIdx = neighbors[j];
-      if (nIdx === undefined || nIdx <= p.id) continue;
-      const n = particles[nIdx];
-      if (!n) continue;
-      const dx = n.x - p.x;
-      const dy = n.y - p.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 >= CLOSE_LINE_DIST_SQ && d2 < LINE_DIST_SQ) {
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(n.x, n.y);
-        drawn++;
-      }
-    }
-  }
   ctx.stroke();
   ctx.restore();
 
@@ -186,7 +160,7 @@ export function render(
     if (farBuckets[c].length === 0 && nearBuckets[c].length === 0) continue;
     ctx.fillStyle = COLORS[c];
 
-    ctx.globalAlpha = GLOW_ALPHA * 0.62;
+    ctx.globalAlpha = GLOW_ALPHA * 0.75;
     drawBucket(ctx, farBuckets[c],  GLOW_RADIUS_FACTOR, ENERGY_GLOW_K);
 
     ctx.globalAlpha = GLOW_ALPHA;
@@ -194,13 +168,13 @@ export function render(
   }
   ctx.restore();
 
-  // ── 7. Solid particles — far layer (dimmed) then near layer (full) ────────
+  // ── 7. Solid particles — far layer (slightly dimmed) then near layer (full) ─
   ctx.save();
   for (let c = 0; c < COLORS.length; c++) {
     if (farBuckets[c].length === 0 && nearBuckets[c].length === 0) continue;
     ctx.fillStyle = COLORS[c];
 
-    ctx.globalAlpha = 0.62;
+    ctx.globalAlpha = 0.75;
     drawBucket(ctx, farBuckets[c],  1, SPEED_SIZE_K);
 
     ctx.globalAlpha = 1;

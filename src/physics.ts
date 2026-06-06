@@ -7,7 +7,7 @@ import {
   BREATH_FREQ, BREATH_AMP,
   NOISE_STRENGTH, WANDER_SCALE, WANDER_SPEED,
   ROTATION_SPEED, TILT_SPEED, TILT_AMP, TORUS_Y_SQUISH,
-  ENERGY_DECAY,
+  ENERGY_DECAY, ENERGY_MAX,
   ALIGN_K,
   TAU,
 } from './config';
@@ -111,10 +111,13 @@ export function updateParticles(
           ax += dx * invDist * force;
           ay += dy * invDist * force;
         } else if (distSq < ATTRACT_RADIUS_SQ) {
-          // Curiosity zone — gentle pull toward cursor
+          // Curiosity zone — bell-shaped attraction: zero at both boundaries,
+          // peaks at the midpoint. Eliminates the ring artifact caused by a
+          // force that was maximum exactly at the repulsion boundary.
           const dist    = Math.sqrt(distSq);
-          const t       = 1 - (dist - REPEL_RADIUS) / (ATTRACT_RADIUS - REPEL_RADIUS);
-          const force   = ATTRACT_STRENGTH * t * t;
+          const t       = (dist - REPEL_RADIUS) / (ATTRACT_RADIUS - REPEL_RADIUS);
+          const bell    = 4 * t * (1 - t);
+          const force   = ATTRACT_STRENGTH * bell;
           const invDist = 1 / dist;
           ax -= dx * invDist * force;
           ay -= dy * invDist * force;
@@ -138,7 +141,10 @@ export function updateParticles(
 
     // ── Particle energy EMA (drives glow) ─────────────────────────────────────
     const spd = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-    p.energy  = p.energy * ENERGY_DECAY + spd * (1 - ENERGY_DECAY);
+    p.energy  = Math.min(
+      p.energy * ENERGY_DECAY + spd * (1 - ENERGY_DECAY),
+      ENERGY_MAX,
+    );
   }
 
   // Return breath value so renderer can pulse the background glow
