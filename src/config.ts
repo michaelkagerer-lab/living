@@ -43,6 +43,9 @@ export const ROTATION_SPEED = 0.0003;
 export const TILT_SPEED = 0.000055;
 export const TILT_AMP   = 0.16;
 
+// ---------- device orientation / desktop parallax ----------
+export const TILT_DEVICE_AMP = 0.25;
+
 // ---------- organic wander field ----------
 export const NOISE_STRENGTH = 0.32;
 export const WANDER_SCALE   = 0.0038;
@@ -51,6 +54,12 @@ export const WANDER_SPEED   = 0.00022;
 // ---------- local velocity alignment (typed-array grid) ----------
 export const ALIGN_K         = 0.006;
 export const ALIGN_MAX_CELLS = 10_000;
+
+// ---------- boids: cohesion + separation ----------
+export const COHESION_K        = 0.003;
+export const SEPARATE_RADIUS   = 10;
+export const SEPARATE_RADIUS_SQ = 100;
+export const SEPARATE_K        = 0.10;
 
 // ---------- autonomous mood state (curious-biased, anxious-tipped) ----------
 export const MOOD_FREQ = 0.0000115;
@@ -77,6 +86,12 @@ export const GAZE_INTERVAL_MS = 15_000;
 export const GAZE_LERP_RATE   = 0.0004;
 export const GAZE_RADIUS      = 180;
 export const GAZE_STRENGTH    = 0.012;
+
+// ---------- gesture vocabulary ----------
+export const GESTURE_SPIN_FRAMES  = 90;
+export const GESTURE_SPIN_MULT    = 5;
+export const HOVER_GAZE_SNAP_MS   = 4_000;
+export const HOVER_GAZE_HOLD_MS   = 25_000;
 
 // ---------- mouse afterglow (memory of presence) ----------
 export const AFTERGLOW_DURATION_MS = 4_000;

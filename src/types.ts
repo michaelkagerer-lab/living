@@ -24,4 +24,5 @@ export interface MouseState {
   lastActiveX: number;  // position when mouse last left the canvas
   lastActiveY: number;
   justLeft: boolean;    // consumed by physics to trigger afterglow
+  gesture: 'none' | 'circle' | 'shake' | 'hover';
 }

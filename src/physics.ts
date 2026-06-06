@@ -10,6 +10,7 @@ import {
   ROTATION_SPEED, TILT_SPEED, TILT_AMP, TORUS_Y_SQUISH,
   ENERGY_DECAY, ENERGY_MAX,
   ALIGN_K, ALIGN_MAX_CELLS,
+  COHESION_K, SEPARATE_RADIUS, SEPARATE_RADIUS_SQ, SEPARATE_K,
   MOOD_FREQ, MOOD_AMP, MOOD_BIAS,
   HEARTBEAT_FREQ, HEARTBEAT_AMP,
   STARTLE_K, AGGRESSION_CAP, STARTLE_TRIGGER_THRESHOLD, STARTLE_RECOVERY_MS,
@@ -17,6 +18,9 @@ import {
   GAZE_INTERVAL_MS, GAZE_LERP_RATE, GAZE_RADIUS, GAZE_STRENGTH,
   AFTERGLOW_DURATION_MS, AFTERGLOW_STRENGTH,
   TRUST_SPEED_THRESHOLD, TRUST_BUILD_MS, TRUST_DECAY_MS, TRUST_ATTRACT_SCALE,
+  TILT_DEVICE_AMP,
+  GESTURE_SPIN_FRAMES, GESTURE_SPIN_MULT,
+  HOVER_GAZE_SNAP_MS, HOVER_GAZE_HOLD_MS,
   PARTICLE_COUNT,
   TAU,
 } from './config';
@@ -47,9 +51,11 @@ function lerpAngle(a: number, b: number, t: number): number {
   return a + d * t;
 }
 
-// ── Typed-array alignment grid (replaces 4 Maps) ─────────────────────────────
+// ── Typed-array alignment + boids grid ───────────────────────────────────────
 const alignVx   = new Float32Array(ALIGN_MAX_CELLS);
 const alignVy   = new Float32Array(ALIGN_MAX_CELLS);
+const alignCx   = new Float32Array(ALIGN_MAX_CELLS);  // position sum x
+const alignCy   = new Float32Array(ALIGN_MAX_CELLS);  // position sum y
 const alignN    = new Uint16Array(ALIGN_MAX_CELLS);
 const alignIdx  = new Int32Array(PARTICLE_COUNT);
 const usedCells = new Uint16Array(ALIGN_MAX_CELLS);
@@ -61,7 +67,9 @@ const ALIGN_CELL = 32;
 function buildAlignGrid(particles: Particle[], width: number): void {
   for (let i = 0; i < usedCount; i++) {
     const c = usedCells[i];
-    alignVx[c] = 0; alignVy[c] = 0; alignN[c] = 0;
+    alignVx[c] = 0; alignVy[c] = 0;
+    alignCx[c] = 0; alignCy[c] = 0;
+    alignN[c]  = 0;
   }
   usedCount = 0;
   alignCols = Math.ceil(width / ALIGN_CELL) + 2;
@@ -73,6 +81,8 @@ function buildAlignGrid(particles: Particle[], width: number): void {
     alignIdx[i] = k;
     alignVx[k] += p.vx;
     alignVy[k] += p.vy;
+    alignCx[k] += p.x;
+    alignCy[k] += p.y;
     alignN[k]++;
   }
 }
@@ -95,6 +105,14 @@ const TRUST_BUILD_RATE        = 1 / (TRUST_BUILD_MS  / 16);
 const TRUST_DECAY_RATE        = 1 / (TRUST_DECAY_MS  / 16);
 const STARTLE_RECOVERY_FRAMES = Math.round(STARTLE_RECOVERY_MS / 16);
 
+// ── Gesture state ─────────────────────────────────────────────────────────────
+let gestureRotationBoost = 0;
+let gestureScatter       = false;
+let hoverDeepMs          = 0;
+
+// ── Startle leading-edge detection ────────────────────────────────────────────
+let prevAggression = 0;
+
 export function updateParticles(
   particles: Particle[],
   mouse: MouseState,
@@ -103,9 +121,12 @@ export function updateParticles(
   width: number,
   height: number,
   time: number,
-): { breathValue: number; excitement: number } {
+  tilt: { x: number; y: number } = { x: 0, y: 0 },
+): { breathValue: number; excitement: number; mood: number; twitchFired: boolean; startleFired: boolean } {
   const minDim      = Math.min(width, height);
-  const ySquish     = TORUS_Y_SQUISH * (1 + Math.sin(time * TILT_SPEED) * TILT_AMP);
+  const ySquish     = TORUS_Y_SQUISH * (1 + Math.sin(time * TILT_SPEED) * TILT_AMP)
+                    + tilt.y * TILT_DEVICE_AMP;
+  const xShear      = tilt.x * TILT_DEVICE_AMP * 0.5;
   const mouseActive = mouse.active;
   const mouseX      = mouse.x;
   const mouseY      = mouse.y;
@@ -125,6 +146,10 @@ export function updateParticles(
     ? Math.min(Math.max(0, (mouse.speed - startleThreshold) / 3.0), AGGRESSION_CAP)
     : 0;
   const gentleness = mouseActive ? Math.max(0, 1 - mouse.speed / 1.5) : 0;
+
+  // ── Startle leading-edge ──────────────────────────────────────────────────
+  const startleFired = aggression > STARTLE_TRIGGER_THRESHOLD && prevAggression <= STARTLE_TRIGGER_THRESHOLD;
+  prevAggression     = aggression;
 
   // ── Effective breath amplitude ────────────────────────────────────────────
   const moodBreathBoost    = mood > 0 ? mood * 0.20 : mood * 0.12;
@@ -176,6 +201,31 @@ export function updateParticles(
   if (isRecovering) startleRecovery--;
   const recoveryStrength = isRecovering ? startleRecovery / STARTLE_RECOVERY_FRAMES : 0;
 
+  // ── Gesture: circle → spin boost ─────────────────────────────────────────
+  if (mouse.gesture === 'circle' && gestureRotationBoost === 0) {
+    gestureRotationBoost = GESTURE_SPIN_FRAMES;
+  }
+  if (mouse.gesture === 'shake') {
+    gestureScatter = true;
+  }
+  const effectiveRotation = gestureRotationBoost > 0
+    ? ROTATION_SPEED * GESTURE_SPIN_MULT
+    : ROTATION_SPEED;
+  if (gestureRotationBoost > 0) gestureRotationBoost--;
+
+  // ── Hover gaze snap — hold still 4s → gaze locks to cursor ──────────────
+  if (mouseActive && trustLevel >= 1 && mouse.speed < TRUST_SPEED_THRESHOLD * 0.6) {
+    hoverDeepMs += 16;
+    if (hoverDeepMs > HOVER_GAZE_SNAP_MS) {
+      gazeTargetPhi   = Math.atan2(mouseY - cy, mouseX - cx);
+      gazeTargetTheta = Math.PI / 2;
+      gazeNextUpdate  = time + HOVER_GAZE_HOLD_MS;
+      hoverDeepMs     = 0;
+    }
+  } else {
+    hoverDeepMs = 0;
+  }
+
   // ── Gaze target ───────────────────────────────────────────────────────────
   if (time > gazeNextUpdate) {
     gazeTargetPhi   = Math.random() * TAU;
@@ -185,7 +235,7 @@ export function updateParticles(
   gazePhi   = lerpAngle(gazePhi,   gazeTargetPhi,   GAZE_LERP_RATE);
   gazeTheta = lerpAngle(gazeTheta, gazeTargetTheta, GAZE_LERP_RATE);
   const [gazeWx, gazeWy] = torusXY(
-    gazePhi + ROTATION_SPEED * time, gazeTheta, cx, cy, minDim, ySquish,
+    gazePhi + effectiveRotation * time, gazeTheta, cx, cy, minDim, ySquish, xShear,
   );
 
   buildAlignGrid(particles, width);
@@ -199,8 +249,8 @@ export function updateParticles(
     const p = particles[i];
 
     // ── Rotation + home recompute ─────────────────────────────────────────
-    p.phi += ROTATION_SPEED;
-    const [hx, hy] = torusXY(p.phi, p.theta, cx, cy, minDim, ySquish);
+    p.phi += effectiveRotation;
+    const [hx, hy] = torusXY(p.phi, p.theta, cx, cy, minDim, ySquish, xShear);
     p.hx = hx;
     p.hy = hy;
 
@@ -261,10 +311,16 @@ export function updateParticles(
         }
       }
 
-      if (aggression > 0) {
+      if (aggression > 0 && !gestureScatter) {
         ax -= (p.x - cx) * STARTLE_K * aggression * speedBoost;
         ay -= (p.y - cy) * STARTLE_K * aggression * speedBoost;
       }
+    }
+
+    // ── Gesture scatter — outward burst instead of inward startle ────────
+    if (gestureScatter) {
+      ax += (p.x - cx) * STARTLE_K * 1.5;
+      ay += (p.y - cy) * STARTLE_K * 1.5;
     }
 
     // ── Afterglow attraction ──────────────────────────────────────────────
@@ -290,6 +346,23 @@ export function updateParticles(
     ax += (avgVx - p.vx) * ALIGN_K;
     ay += (avgVy - p.vy) * ALIGN_K;
 
+    // ── Boids: cohesion + separation ──────────────────────────────────────
+    const localCx   = alignCx[k] / n;
+    const localCy   = alignCy[k] / n;
+    const sepDx     = p.x - localCx;
+    const sepDy     = p.y - localCy;
+    const sepDistSq = sepDx * sepDx + sepDy * sepDy;
+
+    ax += (localCx - p.x) * COHESION_K;
+    ay += (localCy - p.y) * COHESION_K;
+
+    if (sepDistSq > 0.01 && sepDistSq < SEPARATE_RADIUS_SQ) {
+      const sepDist = Math.sqrt(sepDistSq);
+      const sepF    = SEPARATE_K * (1 - sepDist / SEPARATE_RADIUS);
+      ax += (sepDx / sepDist) * sepF;
+      ay += (sepDy / sepDist) * sepF;
+    }
+
     // ── Quirk twitches (suppressed during startle recovery) ───────────────
     if (twitchActive && !isRecovering) {
       ax += twitchAx * p.temperament;
@@ -300,7 +373,7 @@ export function updateParticles(
     p.vx = (p.vx + ax) * DAMPING;
     p.vy = (p.vy + ay) * DAMPING;
 
-    // ── Velocity cap (prevents collapse on fast mouse movement) ───────────
+    // ── Velocity cap ──────────────────────────────────────────────────────
     const velSq = p.vx * p.vx + p.vy * p.vy;
     if (velSq > VEL_CAP_SQ) {
       const inv = VEL_CAP / Math.sqrt(velSq);
@@ -320,8 +393,11 @@ export function updateParticles(
     totalEnergy += p.energy;
   }
 
+  // Reset one-shot scatter flag after loop
+  gestureScatter = false;
+
   const breathValue = Math.sin(bt);
   const excitement  = totalEnergy / particles.length / ENERGY_MAX;
 
-  return { breathValue, excitement };
+  return { breathValue, excitement, mood, twitchFired: twitchActive, startleFired };
 }

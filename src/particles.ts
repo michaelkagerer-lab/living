@@ -12,12 +12,13 @@ export function torusXY(
   cx: number, cy: number,
   minDim: number,
   ySquish: number = TORUS_Y_SQUISH,
+  xShear: number = 0,
 ): [number, number] {
   const R = TORUS_R_MAJOR * minDim;
   const r = TORUS_R_MINOR * minDim;
   const tubeFactor = R + r * Math.cos(theta);
   return [
-    cx + tubeFactor * Math.cos(phi),
+    cx + tubeFactor * Math.cos(phi) + xShear * tubeFactor,
     cy + tubeFactor * Math.sin(phi) * ySquish,
   ];
 }
