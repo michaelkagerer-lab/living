@@ -62,8 +62,17 @@ function main(): void {
   });
 
   const startTime = performance.now();
+  // Cap to 30fps on ≤2-core devices to halve render cost
+  const targetInterval = (navigator.hardwareConcurrency ?? 4) <= 2 ? 33 : 0;
+  let lastFrameTime = 0;
+  let rafId = 0;
 
   function loop(timestamp: number): void {
+    if (targetInterval > 0 && timestamp - lastFrameTime < targetInterval) {
+      rafId = requestAnimationFrame(loop);
+      return;
+    }
+    lastFrameTime = timestamp;
     const time = timestamp - startTime;
 
     // Desktop parallax fallback — mouse offset from center → gentle tilt
@@ -90,10 +99,19 @@ function main(): void {
     prevBreathValue = breathValue;
 
     render(ctx, particles, cssW, cssH, breathValue, excitement, mood, behaviorState);
-    requestAnimationFrame(loop);
+    rafId = requestAnimationFrame(loop);
   }
 
-  requestAnimationFrame(loop);
+  // Pause the loop when the tab is hidden — saves 100% CPU in background
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      cancelAnimationFrame(rafId);
+    } else {
+      rafId = requestAnimationFrame(loop);
+    }
+  });
+
+  rafId = requestAnimationFrame(loop);
 }
 
 main();

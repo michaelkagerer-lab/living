@@ -112,6 +112,7 @@ export class OrganismAudio {
     filter.connect(gain);
     gain.connect(this.master!);
     src.start(now);
+    src.onended = () => { src.disconnect(); filter.disconnect(); gain.disconnect(); };
   }
 
   private twitch(): void {
@@ -125,6 +126,7 @@ export class OrganismAudio {
     gain.connect(this.master!);
     osc.start(now);
     osc.stop(now + 0.04);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   private startle(responseScale: number): void {
@@ -139,6 +141,7 @@ export class OrganismAudio {
     gain.connect(this.master!);
     osc.start(now);
     osc.stop(now + 0.2);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   toggle(): void {

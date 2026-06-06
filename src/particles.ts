@@ -31,13 +31,21 @@ function pickColor(rand: number): number {
   return COLOR_CUMULATIVE.length - 1;
 }
 
+function resolveParticleCount(): number {
+  const cores = navigator.hardwareConcurrency ?? 4;
+  if (cores <= 2) return 800;
+  if (cores <= 4) return 1400;
+  return PARTICLE_COUNT;
+}
+
 export function initParticles(width: number, height: number): Particle[] {
   const cx = width / 2;
   const cy = height / 2;
   const minDim = Math.min(width, height);
-  const particles: Particle[] = new Array(PARTICLE_COUNT);
+  const count = resolveParticleCount();
+  const particles: Particle[] = new Array(count);
 
-  for (let i = 0; i < PARTICLE_COUNT; i++) {
+  for (let i = 0; i < count; i++) {
     const phi   = Math.random() * TAU;
     const theta = Math.random() * TAU;
     const [hx, hy] = torusXY(phi, theta, cx, cy, minDim);
@@ -65,6 +73,7 @@ export function initParticles(width: number, height: number): Particle[] {
 
   return particles;
 }
+
 
 export function repositionHomes(
   particles: Particle[],

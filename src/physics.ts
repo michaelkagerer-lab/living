@@ -2,7 +2,7 @@ import type { Particle, MouseState, BehaviorState } from './types';
 import { torusXY } from './particles';
 import {
   SPRING_K, DAMPING,
-  VEL_CAP, VEL_CAP_SQ,
+  VEL_CAP,
   REPEL_RADIUS, REPEL_STRENGTH, REPEL_SPEED_K, SPEED_BOOST_CAP,
   ATTRACT_RADIUS, ATTRACT_STRENGTH,
   BREATH_FREQ, BREATH_AMP,
@@ -30,7 +30,7 @@ import {
   LEADER_WANDER_MULT, LEADER_SPRING_MULT, LEADER_ALIGN_WEIGHT, LEADER_GAZE_MULT,
   CIRCADIAN_FREQ, CIRCADIAN_AMP, CIRCADIAN_BIAS, CIRCADIAN_WANDER_K, CIRCADIAN_BREATH_K,
   PREDICT_LEAD_MS, PREDICT_RADIUS, PREDICT_STRENGTH,
-  PARTICLE_COUNT,
+  PARTICLE_COUNT, WANDER_CACHE_INTERVAL,
   TAU,
 } from './config';
 
@@ -72,6 +72,11 @@ const usedCells = new Uint16Array(ALIGN_MAX_CELLS);
 let   usedCount = 0;
 let   alignCols = 1;
 
+// ── Wander force cache (updated every WANDER_CACHE_INTERVAL frames) ───────────
+const wanderCacheX = new Float32Array(PARTICLE_COUNT);
+const wanderCacheY = new Float32Array(PARTICLE_COUNT);
+let wanderTick = 0;
+
 const ALIGN_CELL = 32;
 
 function buildAlignGrid(particles: Particle[], width: number): void {
@@ -86,7 +91,9 @@ function buildAlignGrid(particles: Particle[], width: number): void {
 
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
-    const k = ((p.y / ALIGN_CELL) | 0) * alignCols + ((p.x / ALIGN_CELL) | 0);
+    const row = Math.max(0, (p.y / ALIGN_CELL) | 0);
+    const col = Math.max(0, (p.x / ALIGN_CELL) | 0);
+    const k   = Math.min(ALIGN_MAX_CELLS - 1, row * alignCols + col);
     if (alignN[k] === 0) usedCells[usedCount++] = k;
     alignIdx[i] = k;
     const w = p.isLeader ? LEADER_ALIGN_WEIGHT : 1;
@@ -390,7 +397,13 @@ export function updateParticles(
     ay += (hyEff - p.y) * effectiveK;
 
     // ── Wander (state + circadian + leader modulated) ─────────────────────
-    const [wx, wy]    = wanderForce(p.x, p.y, time, p.phase);
+    if ((i + wanderTick) % WANDER_CACHE_INTERVAL === 0) {
+      const [nwx, nwy] = wanderForce(p.x, p.y, time, p.phase);
+      wanderCacheX[i] = nwx;
+      wanderCacheY[i] = nwy;
+    }
+    const wx = wanderCacheX[i];
+    const wy = wanderCacheY[i];
     const leaderWanderMult = p.isLeader ? LEADER_WANDER_MULT : 1.0;
     const wanderScale = (0.45 + p.temperament * 1.10)
                       * (1 - recoveryStrength * 0.40)
@@ -514,10 +527,11 @@ export function updateParticles(
     p.vx = (p.vx + ax) * DAMPING;
     p.vy = (p.vy + ay) * DAMPING;
 
-    // ── Velocity cap ──────────────────────────────────────────────────────
+    // ── Velocity cap + energy EMA (single sqrt) ───────────────────────────
     const velSq = p.vx * p.vx + p.vy * p.vy;
-    if (velSq > VEL_CAP_SQ) {
-      const inv = VEL_CAP / Math.sqrt(velSq);
+    const spd   = Math.sqrt(velSq);
+    if (spd > VEL_CAP) {
+      const inv = VEL_CAP / spd;
       p.vx *= inv;
       p.vy *= inv;
     }
@@ -525,17 +539,16 @@ export function updateParticles(
     p.x += p.vx;
     p.y += p.vy;
 
-    // ── Particle energy EMA ───────────────────────────────────────────────
-    const spd = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-    p.energy  = Math.min(
-      p.energy * ENERGY_DECAY + spd * (1 - ENERGY_DECAY),
+    p.energy = Math.min(
+      p.energy * ENERGY_DECAY + Math.min(spd, VEL_CAP) * (1 - ENERGY_DECAY),
       ENERGY_MAX,
     );
     totalEnergy += p.energy;
   }
 
-  // Reset one-shot scatter flag after loop
+  // Reset one-shot scatter flag after loop; advance wander cache tick
   gestureScatter = false;
+  wanderTick++;
 
   const breathValue = Math.sin(bt);
   const excitement  = totalEnergy / particles.length / ENERGY_MAX;

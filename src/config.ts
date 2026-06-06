@@ -47,9 +47,10 @@ export const TILT_AMP   = 0.16;
 export const TILT_DEVICE_AMP = 0.25;
 
 // ---------- organic wander field ----------
-export const NOISE_STRENGTH = 0.32;
-export const WANDER_SCALE   = 0.0038;
-export const WANDER_SPEED   = 0.00022;
+export const NOISE_STRENGTH        = 0.32;
+export const WANDER_SCALE          = 0.0038;
+export const WANDER_SPEED          = 0.00022;
+export const WANDER_CACHE_INTERVAL = 3;   // recompute wander every N frames (66% trig reduction)
 
 // ---------- local velocity alignment (typed-array grid) ----------
 export const ALIGN_K         = 0.006;

@@ -73,6 +73,9 @@ const nearBuckets: Particle[][] = COLORS.map(() => []);
 
 // ── Mood tint state (lerped each frame) ───────────────────────────────────────
 let tintR = 0, tintG = 0, tintB = 0, tintA = 0;
+// Cached rgb() string — only rebuilt when integer RGB components change
+let cachedTintStr = 'rgb(0,0,0)';
+let cachedTintR = -1, cachedTintG = -1, cachedTintB = -1;
 
 function drawBucket(
   ctx: CanvasRenderingContext2D,
@@ -89,26 +92,6 @@ function drawBucket(
     ctx.moveTo(p.x + r, p.y);
     ctx.arc(p.x, p.y, r, 0, TAU);
   }
-  ctx.fill();
-}
-
-// Tinted version of drawBucket — second pass for mood expression
-function drawBucketTinted(
-  ctx: CanvasRenderingContext2D,
-  bucket: Particle[],
-  radiusMult: number,
-  energyBoost: number,
-  tA: number,
-): void {
-  ctx.beginPath();
-  for (let i = 0; i < bucket.length; i++) {
-    const p = bucket[i];
-    if (p.energy < GLOW_ENERGY_THRESHOLD) continue;
-    const r = p.dotRadius * radiusMult * (1 + p.energy * energyBoost);
-    ctx.moveTo(p.x + r, p.y);
-    ctx.arc(p.x, p.y, r, 0, TAU);
-  }
-  ctx.globalAlpha = tA * 0.75;
   ctx.fill();
 }
 
@@ -151,9 +134,9 @@ export function render(
   const r = Math.round(180 + excitement * 75);
   const g = Math.round(190 + excitement * 10);
   const b = Math.round(255 - excitement * 85);
-  const a = (0.055 + excitement * 0.015).toFixed(3);
+  const alpha = 0.055 + excitement * 0.015;
   const grad   = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, glowR);
-  grad.addColorStop(0, `rgba(${r},${g},${b},${a})`);
+  grad.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
   grad.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
@@ -171,6 +154,12 @@ export function render(
   tintG += (targetG - tintG) * MOOD_TINT_LERP_RATE;
   tintB += (targetB - tintB) * MOOD_TINT_LERP_RATE;
   tintA += (targetA - tintA) * MOOD_TINT_LERP_RATE;
+  // Only rebuild the tint color string when integer RGB values change
+  const tintRi = Math.round(tintR), tintGi = Math.round(tintG), tintBi = Math.round(tintB);
+  if (tintRi !== cachedTintR || tintGi !== cachedTintG || tintBi !== cachedTintB) {
+    cachedTintStr = `rgb(${tintRi},${tintGi},${tintBi})`;
+    cachedTintR = tintRi; cachedTintG = tintGi; cachedTintB = tintBi;
+  }
 
   // ── 3. Build spatial grid ─────────────────────────────────────────────────
   grid.clear();
@@ -217,23 +206,36 @@ export function render(
     (p.isNear ? nearBuckets : farBuckets)[p.colorIndex].push(p);
   }
 
-  // ── 6. Glow pre-pass (soft aura, energy-reactive + mood tint) ────────────
+  // ── 6. Glow pre-pass — single path per color; tint reuses the same path ──
   ctx.save();
+  const hasTint = tintA > 0.01;
   for (let c = 0; c < COLORS.length; c++) {
     if (farBuckets[c].length === 0 && nearBuckets[c].length === 0) continue;
 
-    ctx.fillStyle  = COLORS[c];
-    ctx.globalAlpha = GLOW_ALPHA * 0.75;
-    drawBucket(ctx, farBuckets[c],  GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, GLOW_ENERGY_THRESHOLD);
-
+    ctx.fillStyle   = COLORS[c];
     ctx.globalAlpha = GLOW_ALPHA;
-    drawBucket(ctx, nearBuckets[c], GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, GLOW_ENERGY_THRESHOLD);
+    ctx.beginPath();
+    for (let i = 0; i < farBuckets[c].length; i++) {
+      const p = farBuckets[c][i];
+      if (p.energy < GLOW_ENERGY_THRESHOLD) continue;
+      const gr = p.dotRadius * GLOW_RADIUS_FACTOR * (1 + p.energy * ENERGY_GLOW_K);
+      ctx.moveTo(p.x + gr, p.y);
+      ctx.arc(p.x, p.y, gr, 0, TAU);
+    }
+    for (let i = 0; i < nearBuckets[c].length; i++) {
+      const p = nearBuckets[c][i];
+      if (p.energy < GLOW_ENERGY_THRESHOLD) continue;
+      const gr = p.dotRadius * GLOW_RADIUS_FACTOR * (1 + p.energy * ENERGY_GLOW_K);
+      ctx.moveTo(p.x + gr, p.y);
+      ctx.arc(p.x, p.y, gr, 0, TAU);
+    }
+    ctx.fill();
 
-    // Mood tint overlay on glow pass only
-    if (tintA > 0.005) {
-      ctx.fillStyle = `rgb(${Math.round(tintR)},${Math.round(tintG)},${Math.round(tintB)})`;
-      drawBucketTinted(ctx, farBuckets[c],  GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, tintA * 0.75);
-      drawBucketTinted(ctx, nearBuckets[c], GLOW_RADIUS_FACTOR, ENERGY_GLOW_K, tintA);
+    // Tint overlay reuses the exact same path — no extra beginPath needed
+    if (hasTint) {
+      ctx.fillStyle   = cachedTintStr;
+      ctx.globalAlpha = tintA * 0.6;
+      ctx.fill();
     }
   }
   ctx.restore();
